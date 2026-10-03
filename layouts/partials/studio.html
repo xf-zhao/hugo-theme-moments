@@ -3,7 +3,14 @@
         <p class="studio-eyebrow">YOUR TIMELINE</p>
         <p class="studio-connection" id="studio-connection" role="status">Connecting to your moments…</p>
     </div>
-    <button type="button" class="studio-button studio-post-button" id="studio-new" disabled><span aria-hidden="true">＋</span> Post</button>
+    <div class="studio-toolbar-buttons">
+        <a id="studio-account" class="studio-account" hidden><img id="studio-account-avatar" alt=""><span id="studio-account-name"></span></a>
+        <button type="button" class="studio-action" id="studio-profile" hidden>Settings</button>
+        <button type="button" class="studio-action" id="studio-logout" hidden>Log out</button>
+        <button type="button" class="studio-button studio-button-secondary" id="studio-login" hidden>Log in</button>
+        <button type="button" class="studio-button studio-button-secondary" id="studio-hidden" hidden>Hidden <span id="studio-hidden-count">0</span></button>
+        <button type="button" class="studio-button studio-post-button" id="studio-new" disabled><span aria-hidden="true">＋</span> Post</button>
+    </div>
 </div>
 
 <dialog class="studio-dialog" id="studio-composer" aria-labelledby="studio-composer-title">
@@ -39,5 +46,43 @@
             </div>
         </div>
     </form>
+</dialog>
+<dialog class="studio-dialog" id="studio-hidden-dialog" aria-labelledby="studio-hidden-title">
+    <div class="studio-dialog-heading"><div><p class="studio-eyebrow">ONLY VISIBLE TO YOU</p><h2 id="studio-hidden-title">Hidden moments</h2></div><button type="button" class="studio-close" data-close-dialog="studio-hidden-dialog" aria-label="Close hidden moments">×</button></div>
+    <p class="studio-muted">Hidden moments stay in your Moments folder. Unhide a moment to show it on the timeline again.</p>
+    <div id="studio-hidden-list" class="studio-hidden-list"></div>
+</dialog>
+<dialog class="studio-dialog studio-account-dialog" id="studio-auth-dialog" aria-labelledby="studio-auth-title">
+    <form id="studio-auth-form">
+        <div class="studio-dialog-heading"><div><p class="studio-eyebrow">YOUR MOMENTS ACCOUNT</p><h2 id="studio-auth-title">Log in</h2></div><button type="button" class="studio-close" data-close-dialog="studio-auth-dialog" aria-label="Close login">×</button></div>
+        <p id="studio-auth-description" class="studio-help"></p>
+        <label id="studio-auth-user-label">User<select id="studio-auth-user" name="user_id"></select></label>
+        <label>Password<input id="studio-auth-password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="256" required></label>
+        <p id="studio-auth-message" class="studio-form-message" role="status"></p>
+        <div class="studio-dialog-footer"><span class="studio-muted">Local accounts on this Mac</span><button type="submit" class="studio-button" id="studio-auth-submit">Log in</button></div>
+    </form>
+</dialog>
+<dialog class="studio-dialog" id="studio-profile-dialog" aria-labelledby="studio-profile-title">
+    <div class="studio-dialog-heading"><div><p class="studio-eyebrow">YOUR PROFILE</p><h2 id="studio-profile-title">Profile settings</h2></div><button type="button" class="studio-close" data-close-dialog="studio-profile-dialog" aria-label="Close settings">×</button></div>
+    <form id="studio-profile-form" class="studio-settings-form">
+        <p id="studio-profile-login" class="studio-help"></p>
+        <div class="studio-profile-avatar-row"><img id="studio-profile-avatar" alt="Current avatar" class="studio-profile-avatar"><label>Avatar<input type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp,image/avif"><span class="studio-muted">JPEG, PNG, GIF, WebP, or AVIF · up to 10 MB</span></label></div>
+        <label>Display name<input type="text" name="name" maxlength="80" required></label>
+        <label>Bio<textarea name="bio" rows="3" maxlength="2000" placeholder="A little about you"></textarea></label>
+        <p id="studio-profile-message" class="studio-form-message" role="status"></p>
+        <div class="studio-dialog-footer"><a id="studio-profile-link" class="studio-action">View profile</a><button type="submit" class="studio-button">Save profile</button></div>
+    </form>
+    <details id="studio-add-user-section" class="studio-extra studio-new-account" hidden>
+        <summary>Add another user</summary>
+        <form id="studio-add-user-form" class="studio-settings-form">
+            <label>Login name<input type="text" name="id" pattern="[a-zA-Z0-9_-]{1,40}" maxlength="40" placeholder="e.g. xfz" required><span class="studio-muted">Letters, numbers, hyphens, and underscores</span></label>
+            <label>Display name<input type="text" name="name" maxlength="80" required></label>
+            <label>Bio<textarea name="bio" rows="2" maxlength="2000"></textarea></label>
+            <label>Avatar<input type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp,image/avif"></label>
+            <label>Password<input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+            <p id="studio-add-user-message" class="studio-form-message" role="status"></p>
+            <div class="studio-dialog-footer"><span class="studio-muted">They can post with their own profile</span><button type="submit" class="studio-button">Add user</button></div>
+        </form>
+    </details>
 </dialog>
 <div class="studio-toast" id="studio-toast" role="status" hidden></div>

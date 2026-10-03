@@ -2,14 +2,17 @@
 # Replace baseURL with your public address when you are ready to publish.
 baseURL: http://localhost:1313/
 contentDir: /Users/xufeng/Workspace/Moments
+cleanDestinationDir: true
 # Social data and edit history are kept locally, outside the exported website.
 ignoreFiles:
   - '(^|/)social\.json$'
   - '(^|/)\.history/'
+  - '(^|/)\.trash/'
+  - '(^|/)\.studio/'
 languageCode: en-US
 defaultContentLanguage: en
 timeZone: Asia/Shanghai
-title: "xf-zhao's Moments"
+title: "Moments"
 
 pagination:
   path: .
@@ -26,9 +29,9 @@ cascade:
 
 params:
   localEditor: false
-  title: "xf-zhao's Moments"
+  title: "Moments"
   signature: "Life, thoughts, and discoveries."
-  name: xf-zhao
+  name: xfz
   avatar: default-avatar.png
   cover: default-background.png
 

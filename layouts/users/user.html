@@ -1,0 +1,29 @@
+{{ define "main" }}
+{{ $profile := . }}
+{{ $author := partial "author.html" . }}
+{{ $moments := slice }}
+{{ range .Site.RegularPages }}
+    {{ $postAuthor := partial "author.html" . }}
+    {{ if eq $postAuthor.id $profile.Params.user_id }}{{ $moments = $moments | append . }}{{ end }}
+{{ end }}
+<div class="container">
+    <section class="user-profile" data-user-id="{{ .Params.user_id }}">
+        <img class="user-profile-avatar" src="{{ $author.avatar }}" alt="{{ $author.name }}">
+        <div>
+            <p class="user-profile-eyebrow">User profile</p>
+            <h1>{{ $author.name }}</h1>
+            <p class="user-profile-handle">@{{ .Params.user_id }}</p>
+            <p class="user-profile-bio">{{ .Params.bio }}</p>
+            <p class="user-profile-count">{{ len $moments }} {{ if eq (len $moments) 1 }}moment{{ else }}moments{{ end }}</p>
+            <a class="user-profile-link" href="{{ "/" | relURL }}">All moments</a>
+        </div>
+    </section>
+    {{ if $moments }}
+        {{ $paginator := .Paginate (sort $moments "Date" "desc") }}
+        {{ range $index, $page := $paginator.Pages }}{{ partial "row.html" (dict "page" $page "index" $index) }}{{ end }}
+    {{ else }}<p class="user-profile-empty">No moments yet.</p>{{ end }}
+</div>
+{{ end }}
+{{ define "pagination" }}
+{{ with .Paginator }}{{ partial "pagination.html" (dict "paginator" .) }}{{ end }}
+{{ end }}

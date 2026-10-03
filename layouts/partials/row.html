@@ -2,7 +2,8 @@
 {{ $index := .index }}
 {{ $momentID := $page.Params.moment_id }}
 {{ if not $momentID }}{{ $momentID = substr (sha256 $page.File.Path) 0 24 }}{{ end }}
-<div class="moment-row" data-moment-id="{{ $momentID }}" data-moment-url="{{ $page.RelPermalink }}">
+{{ $author := partial "author.html" $page }}
+<div class="moment-row" data-moment-id="{{ $momentID }}" data-moment-url="{{ $page.RelPermalink }}" data-author-id="{{ $author.id }}">
 
     <div class="pure-g">
 
@@ -24,25 +25,13 @@
                 {{/* user info */}}
                 <div class="user-info">
                     <div class="avatar-block">
-                        {{ $avatar_path :=  "default-avatar.png" }}
-                        {{ with $page.Site.Params.avatar }}
-                            {{ $avatar_path = . }}
-                        {{ end }}
-                        {{ with $page.Params.avatar }}
-                            {{ $avatar_path = . }}
-                        {{ end }}
-                        {{ if resources.Get $avatar_path }}
-                            {{ $avatar_path = (resources.Get $avatar_path).RelPermalink }}
-                        {{ end }}
-                        <img src='{{ $avatar_path }}' class="avatar">
+                        {{ if $author.url }}<a href="{{ $author.url }}" aria-label="View {{ $author.name }}'s profile">{{ end }}
+                        <img src="{{ $author.avatar }}" class="avatar" alt="{{ $author.name }}">
+                        {{ if $author.url }}</a>{{ end }}
                     </div>
                     <div class="intro">
                         <div class="name">
-                        {{ with $page.Params.name }}
-                            {{ . }}
-                        {{ else }}
-                            {{ $page.Site.Params.name }}
-                        {{ end }}
+                        {{ if $author.url }}<a class="user-profile-link" href="{{ $author.url }}">{{ $author.name }}</a>{{ else }}{{ $author.name }}{{ end }}
                         </div>
 
                         <div class="moment-signature">
@@ -208,6 +197,8 @@
                             <button type="button" class="studio-action studio-like" aria-pressed="false"><span aria-hidden="true">♡</span> <span class="studio-like-label">Like</span></button>
                             <button type="button" class="studio-action studio-comments-toggle" aria-expanded="false">Comments <span class="studio-comment-count">0</span></button>
                             <button type="button" class="studio-action studio-edit">Edit</button>
+                            <button type="button" class="studio-action studio-hide">Hide</button>
+                            <button type="button" class="studio-action studio-action-danger studio-delete">Delete</button>
                             <a class="studio-action" href="{{ $page.RelPermalink }}">Open</a>
                         </div>
                         {{ else }}

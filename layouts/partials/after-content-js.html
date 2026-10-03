@@ -1,13 +1,11 @@
 <!-- Like button -->
 <script>
-    $(".fa-heart").click(function(){
-        if ($(this).attr("red") == 'true'){
-            $(this).animate({color:"#808080"});
-            $(this).attr("red", false);
-        } else {
-            $(this).animate({color:"#ff0000"});
-            $(this).attr("red", true);
-        }
+    document.querySelectorAll('.fa-heart').forEach(heart => {
+        heart.addEventListener('click', () => {
+            const liked = heart.getAttribute('red') !== 'true';
+            heart.style.color = liked ? '#ff0000' : '#808080';
+            heart.setAttribute('red', String(liked));
+        });
     });
 </script>
 
@@ -18,9 +16,6 @@
         window.Fancybox.bind('[data-fancybox]', {});
     }
 </script>
-
-<!-- videojs -->
-<script src="https://cdn.staticfile.net/video.js/8.6.1/alt/video-js-cdn.min.css"></script>
 
 {{/* a pangu support */}}
 {{ if .Site.Params.features.pangu }}
@@ -40,18 +35,12 @@
 {{/*  back-top- button */}}
 <button id="back-top-button"><i class="fas fa-chevron-up"></i></button>
 <script>
-    window.onscroll = function() {scrollFunction()};
-    function scrollFunction() {
-        if (document.body.scrollTop > 30 || document.documentElement.scrollTop > 30) {
-            $("#back-top-button").fadeIn();
-        } else {
-            $("#back-top-button").fadeOut();
-        }
-    }
-
-
-    $( "#back-top-button" ).click(function() {
-        $("html, body").animate({scrollTop: 0}, 500);
+    const backTopButton = document.querySelector('#back-top-button');
+    window.addEventListener('scroll', () => {
+        backTopButton.style.display = window.scrollY > 30 ? 'block' : 'none';
+    }, { passive: true });
+    backTopButton.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 </script>
 

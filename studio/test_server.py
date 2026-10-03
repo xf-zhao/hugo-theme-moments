@@ -11,7 +11,7 @@ import tempfile
 import threading
 import unittest
 
-from studio.server import App, Handler, MAX_REQUEST, Problem, REPO, Store, read_document
+from studio.server import App, Handler, MAX_REQUEST, Problem, REPO, Store, read_document, write_document
 
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jV1cAAAAASUVORK5CYII=')
 
@@ -121,6 +121,84 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(edited['url'], moment['url'])
         self.assertEqual(edited['folder'], '2026/11/04/manual')
 
+    def test_hide_edit_and_unhide_preserve_draft_build_settings_and_history(self):
+        moment = self.store.save(payload(draft=True), [('photo.png', PNG)])
+        path = self.root / moment['folder'] / 'index.md'
+        metadata, body = read_document(path)
+        original_build = {'publishResources': False, 'render': 'link', 'list': 'local'}
+        metadata['build'] = original_build
+        write_document(path, metadata, body)
+        moment = self.store.summary(self.store.find(moment['id']))
+        self.assertFalse(moment['hidden'])
+        original = path.read_bytes()
+        hidden = self.store.set_hidden(moment['id'], {'hidden': True, 'revision': moment['revision']})
+        metadata, _ = read_document(path)
+        self.assertTrue(hidden['hidden'])
+        self.assertTrue(hidden['draft'])
+        self.assertEqual(metadata['studio_hidden_build'], original_build)
+        self.assertEqual(metadata['build']['render'], 'never')
+        self.assertEqual(metadata['build']['list'], 'never')
+        self.assertEqual(next((path.parent / '.history').glob('*.md')).read_bytes(), original)
+        edited = self.store.save(payload(body='Edited while hidden', draft=True, revision=hidden['revision'], date='2027-01-01T08:00:00+08:00'), [], moment['id'])
+        self.assertTrue(edited['hidden'])
+        path = self.root / edited['folder'] / 'index.md'
+        self.assertEqual(read_document(path)[0]['build']['render'], 'never')
+        shown = self.store.set_hidden(moment['id'], {'hidden': False, 'revision': edited['revision']})
+        metadata, _ = read_document(path)
+        self.assertFalse(shown['hidden'])
+        self.assertTrue(shown['draft'])
+        self.assertEqual(metadata['build'], original_build)
+        self.assertNotIn('studio_hidden_build', metadata)
+        self.assertEqual((path.parent / shown['pictures'][0]).read_bytes(), PNG)
+
+    def test_visibility_and_delete_require_current_revision(self):
+        moment = self.store.save(payload(), [])
+        with self.assertRaises(Problem):
+            self.store.set_hidden(moment['id'], {'hidden': 'true', 'revision': moment['revision']})
+        self.assertEqual(self.store.summary(self.store.find(moment['id']))['revision'], moment['revision'])
+        hidden = self.store.set_hidden(moment['id'], {'hidden': True, 'revision': moment['revision']})
+        unchanged = self.store.set_hidden(moment['id'], {'hidden': True, 'revision': hidden['revision']})
+        self.assertEqual(unchanged['revision'], hidden['revision'])
+        for operation, changes in [(self.store.set_hidden, {'hidden': False}), (self.store.delete, {})]:
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaises(Problem) as raised:
+                    operation(moment['id'], {**changes, 'revision': moment['revision']})
+                self.assertEqual(raised.exception.status, 409)
+        self.assertTrue(self.store.summary(self.store.find(moment['id']))['hidden'])
+
+    def test_delete_preserves_entire_bundle_in_recoverable_trash(self):
+        moment = self.store.save(payload(), [('photo.png', PNG)])
+        self.store.interact(moment['id'], 'comments', {'text': 'Keep this comment'}, 'Me')
+        edited = self.store.save(payload(body='Updated before deletion', revision=moment['revision']), [], moment['id'])
+        folder = self.root / edited['folder']
+        before = {file.relative_to(folder).as_posix(): file.read_bytes() for file in folder.rglob('*') if file.is_file()}
+        deleted = self.store.delete(moment['id'], {'revision': edited['revision']})
+        self.assertEqual(deleted['id'], moment['id'])
+        self.assertFalse(folder.exists())
+        self.assertEqual(self.store.posts(), [])
+        trash = self.root / deleted['trashed_folder']
+        self.assertTrue(trash.is_relative_to(self.root / '.trash'))
+        for relative, data in before.items():
+            self.assertEqual((trash / relative).read_bytes(), data)
+        manifest = json.loads((trash / 'trash.json').read_text())
+        self.assertEqual(manifest['id'], moment['id'])
+        self.assertEqual(manifest['original_folder'], edited['folder'])
+        self.assertIn('deleted_at', manifest)
+        with self.assertRaises(Problem) as raised:
+            self.store.find(moment['id'])
+        self.assertEqual(raised.exception.status, 404)
+        self.assertEqual(Store(self.root).posts(), [])
+
+    def test_trash_symlink_cannot_move_data_outside_root(self):
+        moment = self.store.save(payload(), [])
+        with tempfile.TemporaryDirectory(prefix='moments-trash-outside-') as outside:
+            (self.root / '.trash').symlink_to(Path(outside), target_is_directory=True)
+            with self.assertRaises(Problem) as raised:
+                self.store.delete(moment['id'], {'revision': moment['revision']})
+            self.assertEqual(raised.exception.status, 403)
+            self.assertTrue((self.root / moment['folder'] / 'index.md').exists())
+            self.assertEqual(list(Path(outside).iterdir()), [])
+
 
 class HugoTests(unittest.TestCase):
     def setUp(self):
@@ -169,6 +247,56 @@ class HugoTests(unittest.TestCase):
         self.assertIsNone(self.app.build())
         self.assertIn('Corrected', (self.app.site_root / 'index.html').read_text())
 
+    def test_hidden_and_trashed_posts_are_absent_from_preview_and_exports(self):
+        public = self.app.store.save(payload(body='Visible public moment'), [])
+        hidden = self.app.store.save(payload(body='HIDDEN_PRIVATE_TEXT', tags=['hidden-unique-tag']), [('hidden.png', PNG)])
+        deleted = self.app.store.save(payload(body='DELETED_PRIVATE_TEXT'), [('deleted.png', PNG)])
+        output = Path(self.temporary.name) / 'public'
+        command = ['hugo', '--minify', '--contentDir', str(self.root), '--destination', str(output)]
+        initial = subprocess.run(command, cwd=REPO, capture_output=True, text=True)
+        self.assertEqual(initial.returncode, 0, initial.stderr)
+        for moment in (hidden, deleted):
+            self.assertTrue((output / moment['url'].lstrip('/') / 'index.html').exists())
+        self.app.store.set_hidden(hidden['id'], {'hidden': True, 'revision': hidden['revision']})
+        self.app.store.delete(deleted['id'], {'revision': deleted['revision']})
+        self.assertIsNone(self.app.build())
+        result = subprocess.run(command, cwd=REPO, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for generated in (self.app.site_root, output):
+            with self.subTest(generated=generated):
+                self.assertIn('Visible public moment', (generated / 'index.html').read_text())
+                self.assertFalse((generated / 'tags/hidden-unique-tag').exists())
+                for moment in (hidden, deleted):
+                    self.assertFalse((generated / moment['url'].lstrip('/')).exists())
+                    self.assertFalse(any((generated / moment['url'].lstrip('/') / picture).exists() for picture in moment['pictures']))
+                self.assertFalse(any('.trash' in path.parts for path in generated.rglob('*')))
+                for file in generated.rglob('*'):
+                    if file.suffix in ('.html', '.xml', '.json'):
+                        text = file.read_text(encoding='utf-8')
+                        self.assertNotIn('HIDDEN_PRIVATE_TEXT', text, file)
+                        self.assertNotIn('DELETED_PRIVATE_TEXT', text, file)
+                        self.assertNotIn('hidden-unique-tag', text, file)
+                        if file.suffix == '.xml':
+                            self.assertNotIn(hidden['url'], text, file)
+                            self.assertNotIn(deleted['url'], text, file)
+        stored = self.app.store.summary(self.app.store.find(hidden['id']))
+        self.assertTrue(stored['hidden'])
+        self.app.store.set_hidden(hidden['id'], {'hidden': False, 'revision': stored['revision']})
+        self.assertIsNone(self.app.build())
+        self.assertIn('HIDDEN_PRIVATE_TEXT', (self.app.site_root / 'index.html').read_text())
+        self.assertTrue((self.app.site_root / hidden['url'].lstrip('/') / 'index.html').exists())
+
+    def test_visibility_change_invalidates_stale_preview_if_rebuild_fails(self):
+        moment = self.app.store.save(payload(body='Previously visible'), [])
+        self.assertIsNone(self.app.build())
+        old_preview = self.app.site_root
+        self.app.store.save(payload(body='{{< nonexistent-shortcode >}}'), [])
+        self.app.store.set_hidden(moment['id'], {'hidden': True, 'revision': moment['revision']})
+        self.assertTrue(self.app.build(invalidate_on_error=True))
+        self.assertIsNone(self.app.site_root)
+        self.assertFalse(old_preview.exists())
+        self.assertTrue(self.app.store.summary(self.app.store.find(moment['id']))['hidden'])
+
     def test_import_preserves_existing_yaml_draft(self):
         source = Path(self.temporary.name) / 'old-content'
         source.mkdir()
@@ -195,6 +323,9 @@ class HttpTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix='moments-http-test-')
         cls.app = App(Path(cls.temporary.name) / 'data')
+        owner = cls.app.accounts.setup('fixture-password')
+        session = cls.app.accounts.new_session(owner)
+        cls.auth_cookie = f'Moments-Session={session}'
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), QuietHandler)
         cls.app.port = cls.server.server_port
         cls.server.app = cls.app
@@ -212,6 +343,7 @@ class HttpTests(unittest.TestCase):
 
     def call(self, method, path, body=None, headers=None):
         headers = dict(headers or {})
+        headers.setdefault('Cookie', self.auth_cookie)
         if body is not None and isinstance(body, dict):
             body = json.dumps(body).encode()
             headers.setdefault('Content-Type', 'application/json')
@@ -262,6 +394,45 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.call('GET', '/api/session', headers={'Host': 'other-site.example'})[0], 403)
         self.assertEqual(self.call('GET', '/../../hugo.yaml')[0], 404)
         self.assertEqual(self.call('GET', '/.history/source.md')[0], 404)
+
+    def test_hide_unhide_delete_and_private_photo_access_through_http(self):
+        moment = self.app.store.save(payload(body='Hide and show via HTTP'), [('secret.png', PNG)])
+        self.app.build()
+        url = '/api/moments/' + moment['id']
+        headers = {'X-Moments-Token': self.app.token}
+        changes = {'hidden': True, 'revision': moment['revision']}
+        self.assertEqual(self.call('PUT', url + '/visibility', changes)[0], 403)
+        self.assertEqual(self.call('DELETE', url, {'revision': moment['revision']})[0], 403)
+        status, saved = self.call('PUT', url + '/visibility', changes, headers)
+        self.assertEqual(status, 200, saved)
+        self.assertIsNone(saved['build_error'])
+        hidden = saved['moment']
+        self.assertTrue(hidden['hidden'])
+        self.assertTrue(self.call('GET', url)[1]['hidden'])
+        self.assertTrue(any(post['id'] == moment['id'] and post['hidden'] for post in self.call('GET', '/api/moments')[1]['moments']))
+        self.assertEqual(self.call('GET', moment['url'])[0], 404)
+        self.assertEqual(self.call('GET', moment['url'] + moment['pictures'][0])[0], 404)
+        photo_route = url + '/' + moment['pictures'][0]
+        self.assertEqual(self.call('GET', photo_route), (200, PNG))
+        self.assertEqual(self.call('HEAD', photo_route), (200, b''))
+        self.assertEqual(self.call('GET', url + '/pictures/../index.md')[0], 404)
+        self.assertEqual(self.call('GET', url + '/pictures/%2e%2e/social.json')[0], 404)
+        self.assertEqual(self.call('GET', url + '/pictures/missing.png')[0], 404)
+        self.assertEqual(self.call('GET', photo_route, headers={'Host': 'other-site.example'})[0], 403)
+        self.assertEqual(self.call('DELETE', url, {'revision': moment['revision']}, headers)[0], 409)
+        status, shown = self.call('PUT', url + '/visibility', {'hidden': False, 'revision': hidden['revision']}, headers)
+        self.assertEqual(status, 200, shown)
+        self.assertFalse(shown['moment']['hidden'])
+        self.assertEqual(self.call('GET', moment['url'])[0], 200)
+        status, deleted = self.call('DELETE', url, {'revision': shown['moment']['revision']}, headers)
+        self.assertEqual(status, 200, deleted)
+        self.assertIsNone(deleted['build_error'])
+        self.assertEqual(deleted['id'], moment['id'])
+        self.assertEqual(self.call('GET', url)[0], 404)
+        self.assertEqual(self.call('GET', moment['url'])[0], 404)
+        self.assertEqual(self.call('GET', photo_route)[0], 404)
+        self.assertEqual(self.call('GET', '/' + deleted['trashed_folder'] + '/index.md')[0], 404)
+        self.assertTrue((self.app.store.root / deleted['trashed_folder'] / 'trash.json').exists())
 
     def test_malformed_and_oversized_requests_are_rejected(self):
         headers = {'X-Moments-Token': self.app.token, 'Content-Type': 'application/json'}

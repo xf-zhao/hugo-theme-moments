@@ -9,6 +9,7 @@ from email import policy
 from email.parser import BytesParser
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie
 import json
 import os
 from pathlib import Path
@@ -111,6 +112,7 @@ class Store:
         self.root = root.expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self.accounts = None
 
     def safe(self, path: Path):
         resolved = path.resolve()
@@ -157,10 +159,22 @@ class Store:
 
     def summary(self, post):
         moment_id, path, metadata, body = post
+        author_id = self.author_id(post)
+        author = None
+        if self.accounts:
+            try:
+                author = self.accounts.user(author_id)
+            except Problem as error:
+                if error.status != 404:
+                    raise
         return {
             'id': moment_id,
+            'author_id': author_id,
+            'name': author['name'] if author else metadata.get('name', ''),
+            'avatar': author['avatar'] if author else metadata.get('avatar', ''),
             'date': parse_date(metadata['date']).isoformat(),
             'draft': bool(metadata.get('draft', False)),
+            'hidden': bool(metadata.get('hidden', False)),
             'body': body,
             'tags': metadata.get('tags', []),
             'pictures': metadata.get('pictures', []),
@@ -174,7 +188,16 @@ class Store:
             'social': self.social(path),
         }
 
-    def save(self, payload, files, moment_id=None):
+    def author_id(self, post):
+        metadata = post[2]
+        if metadata.get('author_id'):
+            return metadata['author_id']
+        if self.accounts:
+            legacy = self.accounts.resolve(metadata.get('name', ''))
+            return legacy['id'] if legacy else self.accounts.default_id
+        return 'xf-zhao'
+
+    def save(self, payload, files, moment_id=None, author_id=None):
         with self.lock:
             previous = self.find(moment_id) if moment_id else None
             metadata = dict(previous[2]) if previous else {}
@@ -218,6 +241,7 @@ class Store:
             })
             moment_id = moment_id or secrets.token_hex(12)
             metadata['moment_id'] = moment_id
+            metadata['author_id'] = self.author_id(previous) if previous else (author_id or (self.accounts.default_id if self.accounts else 'xf-zhao'))
             metadata['url'] = metadata.get('url') or (self.summary(previous)['url'] if previous else f'/moments/{moment_id}/')
             metadata['pictures'] = list(keep) + [item[0] for item in prepared]
             # Only referenced resources are published; comments/history remain source data.
@@ -245,13 +269,73 @@ class Store:
             write_document(path, metadata, body)
             return self.summary((moment_id, path, metadata, body))
 
-    def interact(self, moment_id, action, payload, author):
+    def set_hidden(self, moment_id, payload):
+        with self.lock:
+            post = self.find(moment_id)
+            path, metadata, body = post[1:]
+            if payload.get('revision') != self.revision(path):
+                raise Problem('This moment changed. Reload it before changing its visibility.', 409)
+            hidden = payload.get('hidden')
+            if not isinstance(hidden, bool):
+                raise Problem('hidden must be true or false')
+            if hidden == bool(metadata.get('hidden', False)):
+                return self.summary(post)
+            metadata = dict(metadata)
+            stamp = datetime.now(ZONE).strftime('%Y%m%dT%H%M%S%f')
+            atomic_write(self.safe(path.parent / '.history' / f'{stamp}.md'), path.read_text(encoding='utf-8'))
+            if hidden:
+                metadata['studio_hidden_build'] = dict(metadata.get('build', {}))
+                metadata['build'] = {**metadata['studio_hidden_build'], 'render': 'never', 'list': 'never', 'publishResources': False}
+            else:
+                previous_build = metadata.pop('studio_hidden_build', {})
+                metadata['build'] = {**previous_build, 'publishResources': False}
+            metadata['hidden'] = hidden
+            write_document(path, metadata, body)
+            return self.summary((moment_id, path, metadata, body))
+
+    def delete(self, moment_id, payload):
+        with self.lock:
+            post = self.find(moment_id)
+            if payload.get('revision') != self.revision(post[1]):
+                raise Problem('This moment changed. Reload it before deleting it.', 409)
+            source = self.safe(post[1].parent)
+            now = datetime.now(ZONE)
+            destination = self.safe(self.root / '.trash' / f'{now.strftime("%Y%m%dT%H%M%S%f")}-{moment_id}')
+            record = {'id': moment_id, 'original_folder': source.relative_to(self.root).as_posix(), 'deleted_at': now.isoformat()}
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            source.rename(destination)
+            try:
+                atomic_write(destination / 'trash.json', json.dumps(record, ensure_ascii=False, indent=2) + '\n')
+            except OSError:
+                destination.rename(source)
+                raise
+            return {'id': moment_id, 'trashed_folder': destination.relative_to(self.root).as_posix()}
+
+    def picture(self, moment_id, name):
+        with self.lock:
+            post = self.find(moment_id)
+            relative = 'pictures/' + name
+            if relative not in post[2].get('pictures', []):
+                raise Problem('Photo not found', 404)
+            folder = self.safe(post[1].parent)
+            target = self.safe(folder / relative)
+            if not target.is_relative_to(folder) or not target.is_file() or any(part.startswith('.') for part in Path(relative).parts):
+                raise Problem('Photo not found', 404)
+            return target
+
+    def interact(self, moment_id, action, payload, author, author_id=None):
         with self.lock:
             post = self.find(moment_id)
             social = self.social(post[1])
             if action == 'like':
                 if not isinstance(payload.get('liked'), bool):
                     raise Problem('liked must be true or false')
+                if author_id:
+                    likes = social.get('likes', [self.accounts.default_id] if social.get('liked') and self.accounts else [])
+                    likes = [user_id for user_id in likes if user_id != author_id]
+                    if payload['liked']:
+                        likes.append(author_id)
+                    social['likes'] = likes
                 social['liked'] = payload['liked']
             elif action == 'comments':
                 text = text_field(payload, 'text', 5000).strip()
@@ -264,6 +348,7 @@ class Store:
                 social['comments'].append({
                     'id': secrets.token_hex(12), 'author': name, 'text': text,
                     'date': datetime.now(ZONE).isoformat(), 'parent_id': parent,
+                    'author_id': author_id,
                 })
             else:
                 raise Problem('Action not found', 404)
@@ -312,8 +397,14 @@ class Store:
 
 
 class App:
-    def __init__(self, root: Path, port=1313, author='xf-zhao'):
+    def __init__(self, root: Path, port=1313, author='xf-zhao', avatar='default-avatar.png', bio=''):
+        from studio.accounts import Accounts
         self.store = Store(root)
+        self.accounts = Accounts(self.store.root, name=author, avatar=avatar, bio=bio)
+        self.store.accounts = self.accounts
+        for post in self.store.posts():
+            if post[2].get('name') and not self.accounts.resolve(post[2]['name']):
+                self.accounts.import_legacy(post[2]['name'], post[2].get('avatar', avatar))
         self.port = port
         self.author = author
         self.token = secrets.token_urlsafe(32)
@@ -337,8 +428,11 @@ class App:
         digest.update((REPO / 'hugo.yaml').read_bytes())
         return digest.hexdigest()
 
-    def build(self):
+    def build(self, invalidate_on_error=False):
         with self.lock:
+            for post in self.store.posts():
+                if post[2].get('name') and not self.accounts.resolve(post[2]['name']):
+                    self.accounts.import_legacy(post[2]['name'], post[2].get('avatar', 'default-avatar.png'))
             self.generation += 1
             output = Path(self.temporary.name).resolve() / str(self.generation)
             try:
@@ -359,6 +453,12 @@ class App:
                 self.fingerprint = self.source_fingerprint()
             except (OSError, subprocess.TimeoutExpired) as error:
                 self.build_error = str(error)
+            if self.build_error and invalidate_on_error:
+                # A stale preview could still display a hidden or deleted moment.
+                previous = self.site_root
+                self.site_root = None
+                if previous:
+                    shutil.rmtree(previous, ignore_errors=True)
             return self.build_error
 
     def watch(self):
@@ -397,11 +497,50 @@ class Handler(SimpleHTTPRequestHandler):
         if not secrets.compare_digest(self.headers.get('X-Moments-Token', ''), self.app.token):
             raise Problem('Reload the page to reconnect to the editor', 403)
 
-    def respond(self, payload, status=200):
+    def session_token(self):
+        cookies = SimpleCookie()
+        try:
+            cookies.load(self.headers.get('Cookie', ''))
+        except Exception:
+            return ''
+        item = cookies.get('Moments-Session')
+        return item.value if item else ''
+
+    def current_user(self, required=False):
+        user = self.app.accounts.session(self.session_token())
+        if required and not user:
+            raise Problem('Log in before making changes', 401)
+        return user
+
+    def manage(self, moment_id, user):
+        post = self.app.store.find(moment_id)
+        if not self.app.accounts.can_manage(user, self.app.store.author_id(post)):
+            raise Problem('You can manage your own moments', 403)
+        return post
+
+    def visible(self, post, user):
+        return not post[2].get('hidden') or self.app.accounts.can_manage(user, self.app.store.author_id(post))
+
+    def social_view(self, social, user):
+        result = dict(social)
+        likes = social.get('likes', [self.app.accounts.default_id] if social.get('liked') else [])
+        result['liked'] = bool(user and user['id'] in likes)
+        result['like_count'] = len(likes)
+        return result
+
+    def moment_view(self, post, user):
+        result = self.app.store.summary(post)
+        result['social'] = self.social_view(result['social'], user)
+        return result
+
+    def respond(self, payload, status=200, session_cookie=None):
         body = json.dumps(payload, ensure_ascii=False, default=json_default).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
+        if session_cookie is not None:
+            age = 43200 if session_cookie else 0
+            self.send_header('Set-Cookie', f'Moments-Session={session_cookie}; Path=/; Max-Age={age}; HttpOnly; SameSite=Strict')
         self.end_headers()
         self.wfile.write(body)
 
@@ -443,38 +582,121 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.valid_host():
                 raise Problem('Open the editor through localhost', 403)
             route = urlsplit(self.path).path
+            user = self.current_user()
             if method == 'GET' and route == '/api/session':
-                self.respond({'token': self.app.token, 'author': self.app.author, 'data_root': str(self.app.store.root), 'generation': self.app.generation, 'build_error': self.app.build_error})
+                self.respond({'token': self.app.token, 'author': user['name'] if user else self.app.accounts.user(self.app.accounts.default_id)['name'],
+                    'user': user, 'authenticated': user is not None, 'setup_required': self.app.accounts.setup_required,
+                    'users': self.app.accounts.users(), 'default_user_id': self.app.accounts.default_id,
+                    'data_root': str(self.app.store.root), 'generation': self.app.generation, 'build_error': self.app.build_error})
+                return
+            if method == 'GET' and route == '/api/users':
+                self.respond({'users': self.app.accounts.users()})
                 return
             if method == 'GET' and route == '/api/moments':
                 with self.app.store.lock:
-                    moments = [self.app.store.summary(post) for post in self.app.store.posts()]
+                    moments = [self.moment_view(post, user) for post in self.app.store.posts() if self.visible(post, user)]
                 self.respond({'moments': sorted(moments, key=lambda post: post['date'], reverse=True)})
                 return
-            match = re.fullmatch(r'/api/moments/([a-zA-Z0-9_-]+)(?:/(like|comments)(?:/([a-zA-Z0-9_-]+))?)?', route)
-            if method == 'GET' and match:
+            picture_match = re.fullmatch(r'/api/moments/([a-zA-Z0-9_-]+)/pictures/(.+)', route)
+            if method in ('GET', 'HEAD') and picture_match:
                 with self.app.store.lock:
-                    self.respond(self.app.store.summary(self.app.store.find(match[1])))
+                    post = self.app.store.find(picture_match[1])
+                    if not self.visible(post, user):
+                        raise Problem('This moment is hidden', 403)
+                    target = self.app.store.picture(picture_match[1], unquote(picture_match[2]))
+                    with target.open('rb') as source:
+                        extension = image_extension(source.read(40))
+                        content_type = {'.jpg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif'}[extension]
+                        self.send_response(200)
+                        self.send_header('Content-Type', content_type)
+                        self.send_header('Content-Length', str(target.stat().st_size))
+                        self.end_headers()
+                        if method == 'GET':
+                            source.seek(0)
+                            shutil.copyfileobj(source, self.wfile)
                 return
-            if method in ('POST', 'PUT'):
+            match = re.fullmatch(r'/api/moments/([a-zA-Z0-9_-]+)(?:/(like|comments|visibility)(?:/([a-zA-Z0-9_-]+))?)?', route)
+            if method == 'GET' and match and not match[2]:
+                with self.app.store.lock:
+                    post = self.app.store.find(match[1])
+                    if not self.visible(post, user):
+                        raise Problem('This moment is hidden', 403)
+                    self.respond(self.moment_view(post, user))
+                return
+            if method in ('POST', 'PUT', 'DELETE'):
                 self.authorize()
                 payload, files = self.read_payload()
                 with self.app.lock:
+                    if method == 'POST' and route in ('/api/auth/setup', '/api/auth/login'):
+                        if route.endswith('/setup'):
+                            signed_in = self.app.accounts.setup(payload.get('password'))
+                        else:
+                            signed_in = self.app.accounts.login(payload.get('user_id'), payload.get('password'))
+                        self.app.accounts.logout(self.session_token())
+                        cookie = self.app.accounts.new_session(signed_in)
+                        self.respond({'user': signed_in}, session_cookie=cookie)
+                        return
+                    if method == 'POST' and route == '/api/auth/logout':
+                        self.app.accounts.logout(self.session_token())
+                        self.respond({'ok': True}, session_cookie='')
+                        return
+                    user = self.current_user(required=True)
+                    user_match = re.fullmatch(r'/api/users/([a-z0-9_-]{1,40})', route)
+                    if method == 'POST' and route == '/api/users':
+                        if user['role'] != 'owner':
+                            raise Problem('Only the owner can create an account', 403)
+                        created = self.app.accounts.create(payload, files)
+                        error = self.app.build()
+                        self.respond({'user': created, 'build_error': error}, 201)
+                        return
+                    if method == 'PUT' and user_match:
+                        if not self.app.accounts.can_manage(user, user_match[1]):
+                            raise Problem('You can edit your own profile', 403)
+                        updated = self.app.accounts.update(user_match[1], payload, files)
+                        error = self.app.build()
+                        self.respond({'user': updated, 'build_error': error})
+                        return
                     if method == 'POST' and route == '/api/moments':
-                        moment = self.app.store.save(payload, files)
+                        moment = self.app.store.save(payload, files, author_id=user['id'])
                         error = self.app.build()
                         self.respond({'moment': moment, 'build_error': error}, 201)
                         return
                     if match and method == 'PUT' and not match[2]:
+                        self.manage(match[1], user)
                         moment = self.app.store.save(payload, files, match[1])
                         error = self.app.build()
                         self.respond({'moment': moment, 'build_error': error})
                         return
-                    if match and method == 'POST' and match[2] and not match[3]:
-                        self.respond(self.app.store.interact(match[1], match[2], payload, self.app.author))
+                    if match and method == 'PUT' and match[2] == 'visibility' and not match[3]:
+                        self.manage(match[1], user)
+                        moment = self.app.store.set_hidden(match[1], payload)
+                        error = self.app.build(invalidate_on_error=True)
+                        self.respond({'moment': moment, 'build_error': error})
+                        return
+                    if match and method == 'DELETE' and not match[2]:
+                        self.manage(match[1], user)
+                        deleted = self.app.store.delete(match[1], payload)
+                        error = self.app.build(invalidate_on_error=True)
+                        self.respond({**deleted, 'build_error': error})
+                        return
+                    if match and method == 'POST' and match[2] in ('like', 'comments') and not match[3]:
+                        post = self.app.store.find(match[1])
+                        if not self.visible(post, user):
+                            raise Problem('This moment is hidden', 403)
+                        payload['author'] = user['name']
+                        social = self.app.store.interact(match[1], match[2], payload, user['name'], user['id'])
+                        self.respond(self.social_view(social, user))
                         return
                     if match and method == 'PUT' and match[2] == 'comments' and match[3]:
-                        self.respond(self.app.store.edit_comment(match[1], match[3], payload))
+                        post = self.app.store.find(match[1])
+                        if not self.visible(post, user):
+                            raise Problem('This moment is hidden', 403)
+                        comment = next((item for item in self.app.store.social(post[1])['comments'] if item['id'] == match[3]), None)
+                        if not comment:
+                            raise Problem('Comment not found', 404)
+                        if not self.app.accounts.can_manage(user, comment.get('author_id') or self.app.accounts.default_id):
+                            raise Problem('You can edit your own comments', 403)
+                        self.respond(self.social_view(self.app.store.edit_comment(match[1], match[3], payload), user))
                         return
                 raise Problem('Action not found', 404)
             if route.startswith('/api/'):
@@ -515,6 +737,9 @@ class Handler(SimpleHTTPRequestHandler):
     def do_PUT(self):
         self.dispatch('PUT')
 
+    def do_DELETE(self):
+        self.dispatch('DELETE')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -526,8 +751,9 @@ def main():
     if not shutil.which('hugo'):
         parser.error('Install Hugo Extended before starting Moments')
     configuration = subprocess.run(['hugo', 'config', '--format', 'json'], cwd=REPO, capture_output=True, text=True, check=True)
-    author = arguments.name or json.loads(configuration.stdout).get('params', {}).get('name', 'Me')
-    app = App(arguments.data_dir, arguments.port, author)
+    params = json.loads(configuration.stdout).get('params', {})
+    author = arguments.name or params.get('name', 'Me')
+    app = App(arguments.data_dir, arguments.port, author, params.get('avatar', 'default-avatar.png'), params.get('signature', ''))
     if arguments.import_content:
         app.store.import_content(arguments.import_content)
     error = app.build()
@@ -549,4 +775,8 @@ def main():
 
 
 if __name__ == '__main__':
+    # Direct script execution and -m execution share the same exception classes.
+    import sys
+    sys.path.insert(0, str(REPO))
+    sys.modules['studio.server'] = sys.modules[__name__]
     main()

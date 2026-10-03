@@ -1,0 +1,14 @@
+{{ define "main" }}
+<div class="container user-directory">
+    <h1>People</h1>
+    {{ range .Pages }}
+    {{ if .Params.user_id }}
+        {{ $author := partial "author.html" . }}
+        <a class="user-directory-person" href="{{ .RelPermalink }}">
+            <img class="avatar" src="{{ $author.avatar }}" alt="{{ $author.name }}">
+            <span><strong>{{ $author.name }}</strong><span>@{{ .Params.user_id }}</span></span>
+        </a>
+    {{ end }}
+    {{ end }}
+</div>
+{{ end }}

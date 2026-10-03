@@ -15,10 +15,23 @@ Start the app from this repository with Python 3.11 or newer and Hugo Extended:
 Open [http://localhost:1313/](http://localhost:1313/). Stop the app with `Ctrl+C`.
 The interface is English and dates use the `Asia/Shanghai` time zone.
 
+On first launch, click **Set up login** and choose a password for **xfz**. Then
+use **Settings** to change your display name, bio, and avatar. Click a user's
+name or avatar to open their profile and moments at `/users/<login-name>/`.
+The owner can use **Settings → Add another user** to create more local accounts.
+Each user can log in, post, and manage their own moments; the owner can manage
+all moments. Comments and likes use the logged-in user's identity.
+
 Use **Post** to write a moment, add photos, choose a date, and add tags. **Save
 draft** keeps an unfinished moment in the local preview. Each moment has **Edit**,
-**Like**, **Comments**, and **Open** controls. Comments support replies and edits.
+**Hide**, **Delete**, **Like**, **Comments**, and **Open** controls. Comments support replies and edits.
 All comments and likes are local and survive restarting the app.
+
+**Hide** keeps the moment off the timeline, user profiles, and public exports.
+Use **Hidden** to edit it or **Unhide** it. **Delete** moves its complete folder
+to `Moments/.trash/`, keeping the text, photos, comments, and history. Each trash
+folder contains `trash.json` with its `original_folder`; to recover a deleted
+moment, move that folder back to the recorded location and remove `trash.json`.
 
 ### Your files
 
@@ -26,6 +39,12 @@ All moment data is stored outside the code repository:
 
 ```text
 /Users/xufeng/Workspace/Moments/
+├── .studio/accounts.json   # Private password hashes; never exported
+├── .trash/                 # Recoverable deleted moments
+├── users/
+│   └── xfz/
+│       ├── _index.md       # Public name, bio, and profile metadata
+│       └── avatar-*.png    # Uploaded avatars (format follows your image)
 └── 2026/
     └── 10/
         └── 03/
@@ -59,24 +78,34 @@ launcher and update `contentDir` in `hugo.yaml` for standalone Hugo builds.
 Edit `hugo.yaml` to change `title`, `params.title`, `params.name`,
 `params.signature`, `params.avatar`, or `params.cover`. Keep the two title values
 in sync. The bundled avatar and cover work until you choose your own images.
-The local app uses the theme's layouts and assets directly.
+The local app uses the theme's layouts and assets directly. Once a local profile
+exists, use **Settings** to change its name, avatar, and bio. The original theme's
+per-post `name` and `avatar` overrides still work: named authors get profiles,
+and the owner can give them a login using **Add another user** with their profile
+ID. Renaming a display name keeps the login name and existing author links.
+
+Passwords are stored as salted hashes in `.studio/accounts.json`. Login sessions
+last up to 12 hours and end when the app restarts. Back up `.studio` with your
+other Moments files to preserve accounts.
 
 ### Export later
 
 Set `baseURL` to your public address and run `hugo --minify --cleanDestinationDir`. The generated site
-is in `public/`; drafts, local editing controls, comment source files, and edit
-history are excluded. The posting and interaction controls run in the local
+is in `public/`; drafts, hidden/deleted moments, passwords, local editing controls,
+comment source files, and edit history are excluded. User profiles and referenced
+avatars are included. The configured `cleanDestinationDir` removes stale pages
+and photos from earlier exports. The posting and interaction controls run in the local
 app. The existing `.github/workflows/docs.yaml` deploys theme documentation.
 
 ### Checks
 
 ```bash
-python3 -m unittest studio.test_server -v
+python3 -m unittest discover -s studio -v
 ```
 
 These checks use temporary data and cover file persistence, photo uploads,
-comments, replies, likes, edit conflicts, date changes, HTTP requests, and Hugo
-exports.
+comments, replies, likes, edit conflicts, date changes, hiding, deletion,
+account login, ownership permissions, profile avatars, HTTP requests, and Hugo exports.
 
 ---
 

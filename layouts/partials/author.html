@@ -1,0 +1,31 @@
+{{- $page := . -}}
+{{- $id := $page.Params.author_id | default ($page.Params.user_id | default "") -}}
+{{- $profile := false -}}
+{{- $defaultProfile := false -}}
+{{- range $page.Site.Pages -}}
+    {{- if and (eq .Type "users") .Params.user_id -}}
+        {{- if .Params.default_user -}}{{- $defaultProfile = . -}}{{- end -}}
+        {{- if or (and $id (eq .Params.user_id $id)) (and (not $id) $page.Params.name (eq (lower .Params.name) (lower $page.Params.name))) -}}
+            {{- $profile = . -}}
+        {{- end -}}
+        {{- if and (not $id) $page.Params.name -}}
+            {{- $candidate := . -}}
+            {{- range .Params.previous_names -}}
+                {{- if eq (lower .) (lower $page.Params.name) -}}{{- $profile = $candidate -}}{{- end -}}
+            {{- end -}}
+        {{- end -}}
+    {{- end -}}
+{{- end -}}
+{{- if and (not $profile) (not $id) (not $page.Params.name) -}}{{- $profile = $defaultProfile -}}{{- end -}}
+{{- $name := $page.Params.name | default $page.Site.Params.name -}}
+{{- $avatar := $page.Params.avatar | default ($page.Site.Params.avatar | default "default-avatar.png") -}}
+{{- $url := "" -}}
+{{- if $profile -}}
+    {{- $id = $profile.Params.user_id -}}
+    {{- $url = $profile.RelPermalink -}}
+    {{- $name = $profile.Params.name -}}
+    {{- $avatar = $profile.Params.avatar | default $avatar -}}
+    {{- with $profile.Resources.GetMatch $avatar -}}{{- $avatar = .RelPermalink -}}{{- end -}}
+{{- end -}}
+{{- with resources.Get $avatar -}}{{- $avatar = .RelPermalink -}}{{- end -}}
+{{- return (dict "id" $id "name" $name "avatar" $avatar "url" $url) -}}
