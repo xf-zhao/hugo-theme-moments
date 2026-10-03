@@ -1,5 +1,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{{ if .Site.Params.localEditor }}
+<link rel="stylesheet" href="{{ "style/studio.css" | relURL }}">
+{{ end }}
 
 <!-- todo change jquery -->
 <script src="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-M/jquery/3.3.1/jquery.min.js" type="application/javascript"></script>

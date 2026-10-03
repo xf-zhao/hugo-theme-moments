@@ -1,6 +1,8 @@
 {{ $page := .page }}
 {{ $index := .index }}
-<div class="moment-row">
+{{ $momentID := $page.Params.moment_id }}
+{{ if not $momentID }}{{ $momentID = substr (sha256 $page.File.Path) 0 24 }}{{ end }}
+<div class="moment-row" data-moment-id="{{ $momentID }}" data-moment-url="{{ $page.RelPermalink }}">
 
     <div class="pure-g">
 
@@ -44,6 +46,7 @@
                         </div>
 
                         <div class="moment-signature">
+                        {{ if and $page.Site.Params.localEditor $page.Draft }}<span class="studio-draft-badge">Draft</span>{{ end }}
                         {{ with $page.Params.signature }}
                             {{ . }}
                         {{ else }}
@@ -154,19 +157,13 @@
 
                     {{ if (eq (len $pictures_set) 1) }}
                         {{ range $pictures_set }}
-                            {{ $src := . }}
-                            {{ if (not (strings.HasPrefix $src "http")) }}
-                            {{/* if src is a url, resources.Get may cause issues */}}
-                                {{ if resources.Get $src }}
-                                    {{ $src = (resources.Get $src).RelPermalink }}
-                                {{ end }}
-                            {{ end }}
-                            <img src="{{ $src }}" class="single-pic" alt="Responsive image" data-fancybox="gallery" data-caption={{ $picture_caption }}></img>
+                            {{ $src := partial "picture-url.html" (dict "src" . "page" $page) }}
+                            <img src="{{ $src }}" class="single-pic" alt="Responsive image" data-fancybox="{{ $momentID }}" data-caption={{ $picture_caption }}></img>
                         {{ end }}
                     {{ end }}
 
                     {{ if (gt (len $pictures_set) 1)}}
-                        {{ partial "pic_set.html" (dict "pic_set" $pictures_set "other" $page.Site.BaseURL "caption" $picture_caption) }}
+                        {{ partial "pic_set.html" (dict "pic_set" $pictures_set "page" $page "caption" $picture_caption "gallery" $momentID) }}
                     {{ end }}
 
                     {{/* Probably DEPRECATED in the future: single picture (old version API `pic`)*/}}
@@ -175,7 +172,7 @@
                         {{ if resources.Get $src }}
                             {{ $src = (resources.Get $src).RelPermalink }}
                         {{ end }}
-                        <img src="{{ . }}" class="single-pic" alt="Responsive image" data-fancybox="gallery" data-caption={{ $picture_caption }}></img>
+                        <img src="{{ . }}" class="single-pic" alt="Responsive image" data-fancybox="{{ $momentID }}" data-caption={{ $picture_caption }}></img>
                     {{ end }}
 
                     {{/* Probably DEPRECATED in the future: multiple pictures (old version API `pic_set`) */}}
@@ -189,7 +186,7 @@
                     {{ end }}
 
                     {{ with $pic_set_filtered }}
-                        {{ partial "pic_set.html" (dict "pic_set" . "caption" $picture_caption) }}
+                        {{ partial "pic_set.html" (dict "pic_set" . "page" $page "caption" $picture_caption "gallery" $momentID) }}
                     {{ end }}
 
 
@@ -206,11 +203,35 @@
                     {{/* Note info shown below the main content */}}
                     <div class="moment-note">
                         <p class="note"><span class="note-time">{{ $page.Date.Format "15:04" }}</span><span class="note-context">{{ $page.Params.note }}</span></p>
+                        {{ if $page.Site.Params.localEditor }}
+                        <div class="studio-actions" aria-label="Moment actions">
+                            <button type="button" class="studio-action studio-like" aria-pressed="false"><span aria-hidden="true">♡</span> <span class="studio-like-label">Like</span></button>
+                            <button type="button" class="studio-action studio-comments-toggle" aria-expanded="false">Comments <span class="studio-comment-count">0</span></button>
+                            <button type="button" class="studio-action studio-edit">Edit</button>
+                            <a class="studio-action" href="{{ $page.RelPermalink }}">Open</a>
+                        </div>
+                        {{ else }}
                         <div class="buttons" style="display: flex;">
                             {{ if $page.Site.Params.experimental.comment }}<div class="comment-btn" id="comment-btn-{{ $index }}"><i class="far fa-comment"></i></div>{{ end }}
                             <div class="like-btn"><i class="far fa-heart"></i></div>
                         </div>
+                        {{ end }}
                     </div>
+
+                    {{ if $page.Site.Params.localEditor }}
+                    <section class="studio-comments" hidden aria-label="Comments">
+                        <div class="studio-comment-list"></div>
+                        <form class="studio-comment-form">
+                            <p class="studio-reply-status" hidden></p>
+                            <label>Comment<textarea name="text" rows="2" maxlength="5000" placeholder="Leave a thought…" required></textarea></label>
+                            <div class="studio-comment-bottom">
+                                <label>Name<input name="author" value="{{ $page.Site.Params.name }}" maxlength="80" required></label>
+                                <button type="submit" class="studio-button">Comment</button>
+                            </div>
+                            <p class="studio-form-message" role="status"></p>
+                        </form>
+                    </section>
+                    {{ end }}
 
                     {{ if $page.Site.Params.experimental.comment }}
                     <div id="row-comment-{{ $index }}" style="display: none;">

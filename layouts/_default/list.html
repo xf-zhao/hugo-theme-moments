@@ -1,6 +1,6 @@
 {{ define "main" }}
     <div class="container">
-        {{ $paginator := .Paginate ((where $.Site.RegularPages "Section" .Section).ByParam "top") }}
+        {{ $paginator := .Paginate (.RegularPagesRecursive.ByParam "top") }}
         {{ range $i, $page := $paginator.Pages }}
             {{ partial "row.html" (dict "page" $page "index" $i) }}
         {{ end }}
@@ -9,6 +9,6 @@
 
 
 {{ define "pagination" }}
-    {{ $paginator := .Paginate ((where $.Site.RegularPages "Section" .Section).ByParam "top") }}
+    {{ $paginator := .Paginate (.RegularPagesRecursive.ByParam "top") }}
     {{ partial "pagination.html" (dict "paginator" $paginator) }}
 {{ end }}

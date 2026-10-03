@@ -13,6 +13,11 @@
 
 <!-- fancybox -->
 <script src="https://cdn.jsdelivr.net/npm/@fancyapps/ui/dist/fancybox.umd.js"></script>
+<script>
+    if (window.Fancybox && typeof window.Fancybox.bind === 'function') {
+        window.Fancybox.bind('[data-fancybox]', {});
+    }
+</script>
 
 <!-- videojs -->
 <script src="https://cdn.staticfile.net/video.js/8.6.1/alt/video-js-cdn.min.css"></script>

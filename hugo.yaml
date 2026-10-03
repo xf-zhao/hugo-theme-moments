@@ -1,0 +1,49 @@
+# This checkout contains the theme's layouts and assets, so no theme setting is needed.
+# Replace baseURL with your public address when you are ready to publish.
+baseURL: http://localhost:1313/
+contentDir: /Users/xufeng/Workspace/Moments
+# Social data and edit history are kept locally, outside the exported website.
+ignoreFiles:
+  - '(^|/)social\.json$'
+  - '(^|/)\.history/'
+languageCode: en-US
+defaultContentLanguage: en
+timeZone: Asia/Shanghai
+title: "xf-zhao's Moments"
+
+pagination:
+  path: .
+  pagerSize: 10
+
+taxonomies:
+  tag: tags
+
+# The theme reads the posting label from each moment's signature.
+# Individual moments can override this English default.
+cascade:
+  params:
+    signature: posted
+
+params:
+  localEditor: false
+  title: "xf-zhao's Moments"
+  signature: "Life, thoughts, and discoveries."
+  name: xf-zhao
+  avatar: default-avatar.png
+  cover: default-background.png
+
+  dateStyle: classic
+  infiniteScroll: false
+
+  tag:
+    showTotalCount: true
+    index:
+      show: false
+      isOldFirst: false
+
+  features:
+    pangu: false
+    heti: false
+
+  experimental:
+    comment: false

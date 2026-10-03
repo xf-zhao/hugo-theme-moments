@@ -1,37 +1,26 @@
----
-# 置顶 (如需置顶这片Moment, 则将值设定为大于0的整数, 值越小越靠前，例如1会将moment放在最顶端)
-top: 
++++
+date = "{{ .Date }}"
+draft = true
+tags = []
 
-# 名称（不填写则为设置的默认名称）
-name:
+# Optional: override the default profile for this moment.
+# name = "Your name"
+# avatar = "profile/avatar.png"
+# signature = "posted"
 
-# 头像（不填写则为设置的默认头像）
-avatar:
+# Optional: pin this moment. Smaller positive numbers appear first.
+# top = 1
 
-# 发布时间
-date: {{ .Date }}
+# Optional: photos from this moment's pictures/ folder or full HTTPS URLs.
+# pictures = ["pictures/example.jpg"]
 
-# 给Moment添加标签
-tags:
- -
- -
+# Optional: share a link.
+# link = "https://example.com/article"
+# link_text = "An article worth keeping"
+# link_logo = "link-logos/default_link_logo.png"
 
-# 附加信息（选填1项或者不填写）
-# 附加信息类型1:单个图片
-pictures:
- - 
+# Optional: a note shown next to the posting time.
+# note = "An evening thought"
++++
 
-# 附加信息类型2:网页链接
-# link：必填，网页链接；
-# link_text：必填，链接显示的文字；
-# link_logo：选填，网页logo，现在支持部分网站自动找到对应图标，无需自己添加图标
-link:
-link_text:
-link_logo:
-
-# 备注信息
-note:
----
-
-<!-- 下面开始写正文 -->
-
+Write your moment here.

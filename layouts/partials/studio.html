@@ -1,0 +1,43 @@
+<div class="container studio-toolbar" data-author="{{ .Site.Params.name }}">
+    <div>
+        <p class="studio-eyebrow">YOUR TIMELINE</p>
+        <p class="studio-connection" id="studio-connection" role="status">Connecting to your moments…</p>
+    </div>
+    <button type="button" class="studio-button studio-post-button" id="studio-new" disabled><span aria-hidden="true">＋</span> Post</button>
+</div>
+
+<dialog class="studio-dialog" id="studio-composer" aria-labelledby="studio-composer-title">
+    <form id="studio-post-form">
+        <div class="studio-dialog-heading">
+            <div><p class="studio-eyebrow">A LITTLE OF YOUR DAY</p><h2 id="studio-composer-title">New moment</h2></div>
+            <button type="button" class="studio-close" id="studio-close" aria-label="Close editor">×</button>
+        </div>
+        <label class="studio-body-label" for="studio-body">What would you like to remember?</label>
+        <textarea id="studio-body" name="body" rows="6" maxlength="100000" placeholder="A thought, a discovery, a small moment…"></textarea>
+        <div class="studio-photos" id="studio-photos" aria-label="Attached photos"></div>
+        <label class="studio-upload" for="studio-files"><span aria-hidden="true">＋</span> Add photos <span class="studio-muted">or drop them here</span></label>
+        <input type="file" id="studio-files" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" multiple class="studio-file-input">
+        <div class="studio-field-row">
+            <label>Date and time <span class="studio-muted">Shanghai</span><input type="datetime-local" id="studio-date" name="date" required></label>
+            <label>Tags<input type="text" id="studio-tags" name="tags" placeholder="daily, thoughts, travel"></label>
+        </div>
+        <details class="studio-extra">
+            <summary>Add a link, note, or pin</summary>
+            <label>Link<input type="url" name="link" placeholder="https://…" maxlength="2000"></label>
+            <label>Link title<input type="text" name="link_text" maxlength="500" placeholder="What are you sharing?"></label>
+            <div class="studio-field-row">
+                <label>Note<input type="text" name="note" maxlength="1000" placeholder="A little extra context"></label>
+                <label>Pin order<input type="number" name="top" value="0" min="0" max="1000"><span class="studio-muted">0 = unpinned</span></label>
+            </div>
+        </details>
+        <p class="studio-form-message" id="studio-post-message" role="status"></p>
+        <div class="studio-dialog-footer">
+            <p id="studio-save-location" class="studio-muted">Saved in your Moments folder</p>
+            <div class="studio-submit-buttons">
+                <button type="submit" class="studio-button studio-button-secondary" id="studio-save-draft" value="draft">Save draft</button>
+                <button type="submit" class="studio-button" id="studio-publish" value="post">Post</button>
+            </div>
+        </div>
+    </form>
+</dialog>
+<div class="studio-toast" id="studio-toast" role="status" hidden></div>

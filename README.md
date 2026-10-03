@@ -4,6 +4,82 @@
     <img src="https://s1.ax1x.com/2023/07/22/pCqEWOx.png" alt="logo" style="width: 60%" />
 </p>
 
+## Your local Moments app
+
+Start the app from this repository with Python 3.11 or newer and Hugo Extended:
+
+```bash
+./studio/launch.sh
+```
+
+Open [http://localhost:1313/](http://localhost:1313/). Stop the app with `Ctrl+C`.
+The interface is English and dates use the `Asia/Shanghai` time zone.
+
+Use **Post** to write a moment, add photos, choose a date, and add tags. **Save
+draft** keeps an unfinished moment in the local preview. Each moment has **Edit**,
+**Like**, **Comments**, and **Open** controls. Comments support replies and edits.
+All comments and likes are local and survive restarting the app.
+
+### Your files
+
+All moment data is stored outside the code repository:
+
+```text
+/Users/xufeng/Workspace/Moments/
+└── 2026/
+    └── 10/
+        └── 03/
+            └── <moment-id>/
+                ├── index.md       # Text and metadata
+                ├── pictures/      # Original uploaded photos
+                ├── social.json    # Local comments, replies, and like
+                └── .history/      # Previous versions of the text
+```
+
+The selected posting date determines the year, month, and day. Multiple moments
+on one day get separate folders. Changing the date moves the complete folder
+and keeps its URL, photos, and comments. Removing a photo from a moment keeps
+the original file on disk. Back up the whole `Moments` directory to keep your
+content and interaction history together.
+
+The starter draft is in `Moments/2026/10/03/first-moment/index.md`. The app saves
+Markdown with JSON front matter; you can also edit the text in your editor.
+The preview rebuilds when source files change. To create a moment from the CLI,
+use the supplied TOML archetype:
+
+```bash
+hugo new --kind moments 2026/10/03/my-note/index.md
+```
+
+To use a different data directory, pass `--data-dir /path/to/Moments` to the
+launcher and update `contentDir` in `hugo.yaml` for standalone Hugo builds.
+
+### Personalize the site
+
+Edit `hugo.yaml` to change `title`, `params.title`, `params.name`,
+`params.signature`, `params.avatar`, or `params.cover`. Keep the two title values
+in sync. The bundled avatar and cover work until you choose your own images.
+The local app uses the theme's layouts and assets directly.
+
+### Export later
+
+Set `baseURL` to your public address and run `hugo --minify --cleanDestinationDir`. The generated site
+is in `public/`; drafts, local editing controls, comment source files, and edit
+history are excluded. The posting and interaction controls run in the local
+app. The existing `.github/workflows/docs.yaml` deploys theme documentation.
+
+### Checks
+
+```bash
+python3 -m unittest studio.test_server -v
+```
+
+These checks use temporary data and cover file persistence, photo uploads,
+comments, replies, likes, edit conflicts, date changes, HTTP requests, and Hugo
+exports.
+
+---
+
 Moments是一款专门为短博文设计的[Hugo](https://gohugo.io/)主题。开发初衷是在微信朋友圈之外做一个纯粹写给自己的，独立的短文/动态空间，去记录生活点滴，个人思绪，发现与想法。后面发现Moments的使用对象不仅仅可以是自己，还可以是一群人，你可以为是朋友、团队，亦或情侣搭建一个专有的Moments空间。
 
 Moments is a hugo theme designed for micro-blogging. The original intention is to create a personal space for sharing daily life, thoughts, discoveries & ideas, outside Wechat. Later on, it came to my mind that Moments can be a sharing space not only for a single individual, but also for friends, teams or even couples.

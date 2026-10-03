@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="{{ .Site.Language.Lang }}">
     <head>
         {{ partial "head.html" . }}
     </head>
@@ -7,6 +7,10 @@
         <div class="page">
             {{ block "header" . }}
                 {{ partial "header.html" (dict "link" $.Site.BaseURL "context" .)}}
+            {{ end }}
+
+            {{ if .Site.Params.localEditor }}
+                {{ partial "studio.html" . }}
             {{ end }}
 
             {{ block "main" . }}
@@ -30,6 +34,10 @@
         </div>
 
         {{ partial "after-content-js.html" . }}
+
+        {{ if .Site.Params.localEditor }}
+        <script src="{{ "scripts/studio.js" | relURL }}" defer></script>
+        {{ end }}
 
     </body>
 

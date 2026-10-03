@@ -14,12 +14,7 @@
 <div class="pic-grid" style="width: {{ $max_width }}%">
     <div class="pure-g">
         {{ range $num, $a := $pic_set }}
-            {{ if (not (strings.HasPrefix $a "http")) }}
-            {{/* if $a is a url, resources.Get may cause issues */}}
-                {{ if resources.Get $a }}
-                    {{ $a = (resources.Get $a).RelPermalink }}
-                {{ end }}
-            {{ end }}
+            {{ $a = partial "picture-url.html" (dict "src" $a "page" $.page) }}
 
             {{ $display := "block"}}
             {{ if gt $num 8 }} {{ $display = "none"}} {{ end }}
@@ -27,14 +22,14 @@
                 <div class="add-padding">
                     {{ if and (eq $num 8) (gt (len $pic_set) 9) }}
                         <div class="img-container img-black-filter">
-                            <a data-src="{{ $a }}" data-fancybox="gallery" data-caption="{{ $caption }}">
+                            <a data-src="{{ $a }}" data-fancybox="{{ $.gallery | default "gallery" }}" data-caption="{{ $caption }}">
                                 <div class="more-icon" style="background-image: url('{{ (resources.Get "more-icon.png").RelPermalink }}');"></div>
                                 <img src="{{ $a }}" alt="pictures"/>
                             </a>
                         </div>
                     {{ else }}
                         <div class="img-container">
-                            <a data-src="{{ $a }}" data-fancybox="gallery" data-caption="{{ $caption }}">
+                            <a data-src="{{ $a }}" data-fancybox="{{ $.gallery | default "gallery" }}" data-caption="{{ $caption }}">
                                 <img src="{{ $a }}" alt="pictures"/>
                             </a>
                         </div>
