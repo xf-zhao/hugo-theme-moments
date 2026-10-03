@@ -15,6 +15,43 @@ Start the app from this repository with Python 3.11 or newer and Hugo Extended:
 Open [http://localhost:1313/](http://localhost:1313/). Stop the app with `Ctrl+C`.
 The interface is English and dates use the `Asia/Shanghai` time zone.
 
+### Other devices and automatic startup
+
+To allow other devices on your network, launch with:
+
+```bash
+cd /Users/xufeng/Workspace/Codes/hugo-theme-moments
+./studio/launch.sh --host 0.0.0.0 --port 1313
+```
+
+The terminal prints this Mac's network URLs. On another device on the same
+network, open `http://<Mac-IP>:1313/` or its `.local` hostname. The app discovers
+this Mac's addresses again as the network changes. To use an additional hostname,
+pass `--allowed-host moments.example` to the launcher. Without `--host`, the app
+listens on `127.0.0.1` for access from this Mac.
+
+To start automatically when you log in to macOS, and keep the app running:
+
+```bash
+python3 studio/autostart.py install
+```
+
+The installed service uses `0.0.0.0:1313` and your Moments data folder. Stop any
+manually launched copy with `Ctrl+C` before installing; the startup service then
+owns port 1313. The script writes
+`~/Library/LaunchAgents/com.xfz.moments.plist`. Logs are in
+`Moments/.studio/logs/stdout.log` and `stderr.log`.
+
+```bash
+python3 studio/autostart.py status
+launchctl kickstart -k "gui/$(id -u)/com.xfz.moments"  # Restart the installed service
+python3 studio/autostart.py remove                   # Stop and disable autostart
+```
+
+Removing the service keeps your moments, profiles, and logs. Complete the first
+password setup at `http://localhost:1313/` on this Mac; configured users can then
+log in from other devices.
+
 On first launch, click **Set up login** and choose a password for **xfz**. Then
 use **Settings** to change your display name, bio, and avatar. Click a user's
 name or avatar to open their profile and moments at `/users/<login-name>/`.

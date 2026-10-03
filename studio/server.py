@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A loopback-only editor for a file-backed Hugo Moments timeline."""
+"""A file-backed Hugo Moments editor for localhost or your local network."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from datetime import date, datetime
 from email import policy
 from email.parser import BytesParser
 import hashlib
+import ipaddress
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 import json
@@ -16,9 +17,11 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
+import time
 import tomllib
 from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
@@ -29,6 +32,53 @@ ZONE = ZoneInfo('Asia/Shanghai')
 MAX_REQUEST = 64 * 1024 * 1024
 MAX_PICTURE = 10 * 1024 * 1024
 ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,80}$')
+
+
+def authority(value):
+    """Return a normalized HTTP authority, rejecting malformed Host headers."""
+    if not isinstance(value, str) or not value or any(ord(char) <= 32 or ord(char) >= 127 for char in value):
+        return None
+    try:
+        parsed = urlsplit('//' + value)
+        host = parsed.hostname
+        port = parsed.port if parsed.port is not None else 80
+        if not 1 <= port <= 65535:
+            return None
+        if not host or parsed.username is not None or parsed.password is not None or parsed.path or parsed.query or parsed.fragment:
+            return None
+        try:
+            host = str(ipaddress.ip_address(host))
+        except ValueError:
+            host = host.lower().rstrip('.')
+            if not re.fullmatch(r'[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?', host):
+                return None
+        return host, port
+    except ValueError:
+        return None
+
+
+def network_hosts():
+    """Discover this Mac's interface addresses and Bonjour name without DNS."""
+    hosts = {'localhost', '127.0.0.1', '::1'}
+    hostname = socket.gethostname().lower().rstrip('.')
+    if authority(hostname):
+        hosts.add(hostname)
+    commands = [(['/sbin/ifconfig'], 'addresses'), (['/usr/sbin/scutil', '--get', 'LocalHostName'], 'name')]
+    for command, kind in commands:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode:
+            continue
+        if kind == 'addresses':
+            for address in re.findall(r'^\s*inet\s+(\d+\.\d+\.\d+\.\d+)\s', result.stdout, re.MULTILINE):
+                hosts.add(str(ipaddress.ip_address(address)))
+        else:
+            name = result.stdout.strip().lower() + '.local'
+            if authority(name):
+                hosts.add(name)
+    return hosts
 
 
 class Problem(Exception):
@@ -397,7 +447,7 @@ class Store:
 
 
 class App:
-    def __init__(self, root: Path, port=1313, author='xf-zhao', avatar='default-avatar.png', bio=''):
+    def __init__(self, root: Path, port=1313, author='xf-zhao', avatar='default-avatar.png', bio='', host='127.0.0.1', allowed_hosts=None):
         from studio.accounts import Accounts
         self.store = Store(root)
         self.accounts = Accounts(self.store.root, name=author, avatar=avatar, bio=bio)
@@ -406,6 +456,17 @@ class App:
             if post[2].get('name') and not self.accounts.resolve(post[2]['name']):
                 self.accounts.import_legacy(post[2]['name'], post[2].get('avatar', avatar))
         self.port = port
+        self.host = host
+        self.extra_hosts = set()
+        for value in allowed_hosts or []:
+            parsed = authority(value)
+            if not parsed or ':' in value or '/' in value:
+                raise Problem('Use a hostname or IPv4 address for --allowed-host, without a port')
+            self.extra_hosts.add(parsed[0])
+        self.network_lock = threading.Lock()
+        self.allowed_hosts = self.extra_hosts | {'localhost', '127.0.0.1', '::1', host.lower()}
+        self.network_checked = 0
+        self.refresh_hosts()
         self.author = author
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
@@ -415,6 +476,12 @@ class App:
         self.build_error = None
         self.fingerprint = None
         self.stopped = threading.Event()
+
+    def refresh_hosts(self):
+        with self.network_lock:
+            if self.host == '0.0.0.0' and time.monotonic() - self.network_checked >= 5:
+                self.allowed_hosts = self.extra_hosts | network_hosts() | {'0.0.0.0'}
+                self.network_checked = time.monotonic()
 
     def source_fingerprint(self):
         digest = hashlib.sha256()
@@ -439,7 +506,7 @@ class App:
                 result = subprocess.run([
                     'hugo', '--environment', 'development', '--buildDrafts', '--buildFuture',
                     '--contentDir', str(self.store.root), '--destination', str(output),
-                    '--baseURL', f'http://localhost:{self.port}/', '--noBuildLock',
+                    '--baseURL', '/', '--noBuildLock',
                 ], cwd=REPO, capture_output=True, text=True, timeout=45)
                 if result.returncode:
                     self.build_error = (result.stderr or result.stdout).strip()[-4000:]
@@ -485,15 +552,28 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def valid_host(self):
-        return self.headers.get('Host') in (f'localhost:{self.app.port}', f'127.0.0.1:{self.app.port}')
+        if len(self.headers.get_all('Host', [])) != 1:
+            return False
+        self.app.refresh_hosts()
+        parsed = authority(self.headers.get('Host'))
+        return bool(parsed and parsed[0] in self.app.allowed_hosts and parsed[1] == self.app.port)
+
+    def local_client(self):
+        try:
+            return ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            return False
 
     def authorize(self):
         if not self.valid_host():
-            raise Problem('Open the editor through localhost', 403)
+            raise Problem('Open Moments through this Mac\'s address or configured hostname', 403)
         origin = self.headers.get('Origin')
-        allowed = (f'http://localhost:{self.app.port}', f'http://127.0.0.1:{self.app.port}')
-        if origin and origin not in allowed:
-            raise Problem('This request did not come from the local editor', 403)
+        if origin:
+            if any(ord(char) <= 32 or ord(char) >= 127 for char in origin):
+                raise Problem('This request did not come from the Moments page you opened', 403)
+            parsed = urlsplit(origin)
+            if parsed.scheme != 'http' or parsed.path or parsed.query or parsed.fragment or authority(parsed.netloc) != authority(self.headers.get('Host')):
+                raise Problem('This request did not come from the Moments page you opened', 403)
         if not secrets.compare_digest(self.headers.get('X-Moments-Token', ''), self.app.token):
             raise Problem('Reload the page to reconnect to the editor', 403)
 
@@ -580,7 +660,7 @@ class Handler(SimpleHTTPRequestHandler):
     def dispatch(self, method):
         try:
             if not self.valid_host():
-                raise Problem('Open the editor through localhost', 403)
+                raise Problem('Open Moments through this Mac\'s address or configured hostname', 403)
             route = urlsplit(self.path).path
             user = self.current_user()
             if method == 'GET' and route == '/api/session':
@@ -629,6 +709,8 @@ class Handler(SimpleHTTPRequestHandler):
                 with self.app.lock:
                     if method == 'POST' and route in ('/api/auth/setup', '/api/auth/login'):
                         if route.endswith('/setup'):
+                            if not self.local_client():
+                                raise Problem('Set up the first login on this Mac at http://localhost:' + str(self.app.port), 403)
                             signed_in = self.app.accounts.setup(payload.get('password'))
                         else:
                             signed_in = self.app.accounts.login(payload.get('user_id'), payload.get('password'))
@@ -745,6 +827,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-dir', type=Path, default=DEFAULT_ROOT)
     parser.add_argument('--port', type=int, default=1313)
+    parser.add_argument('--host', default='127.0.0.1', help='Listen on 127.0.0.1 for this Mac, or 0.0.0.0 for other devices')
+    parser.add_argument('--allowed-host', action='append', default=[], help='Additional trusted hostname, without a port; may be repeated')
     parser.add_argument('--name', help='Override the configured author name for local comments')
     parser.add_argument('--import-content', type=Path, help='Import existing Hugo drafts into the dated data folders')
     arguments = parser.parse_args()
@@ -753,16 +837,25 @@ def main():
     configuration = subprocess.run(['hugo', 'config', '--format', 'json'], cwd=REPO, capture_output=True, text=True, check=True)
     params = json.loads(configuration.stdout).get('params', {})
     author = arguments.name or params.get('name', 'Me')
-    app = App(arguments.data_dir, arguments.port, author, params.get('avatar', 'default-avatar.png'), params.get('signature', ''))
+    if not 1 <= arguments.port <= 65535:
+        parser.error('Choose a port between 1 and 65535')
+    try:
+        app = App(arguments.data_dir, arguments.port, author, params.get('avatar', 'default-avatar.png'), params.get('signature', ''), host=arguments.host, allowed_hosts=arguments.allowed_host)
+    except Problem as error:
+        parser.error(str(error))
     if arguments.import_content:
         app.store.import_content(arguments.import_content)
     error = app.build()
     if error:
         parser.error(error)
-    server = ThreadingHTTPServer(('127.0.0.1', arguments.port), Handler)
+    server = ThreadingHTTPServer((arguments.host, arguments.port), Handler)
     server.app = app
     threading.Thread(target=app.watch, daemon=True).start()
     print(f'Moments is ready at http://localhost:{arguments.port}/', flush=True)
+    if arguments.host == '0.0.0.0':
+        print(f'Listening on all IPv4 interfaces (0.0.0.0:{arguments.port})', flush=True)
+        for hostname in sorted(app.allowed_hosts - {'localhost', '127.0.0.1', '::1', '0.0.0.0'}):
+            print(f'Other devices: http://{hostname}:{arguments.port}/', flush=True)
     print(f'Your moments are saved in {app.store.root}/YYYY/MM/DD/<moment>/', flush=True)
     try:
         server.serve_forever()
